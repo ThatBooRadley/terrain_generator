@@ -90,15 +90,35 @@ impl HeightMap {
         height_map
     }
 
+    #[cfg(not(feature = "color"))]
     fn display(&self) {
-        #[cfg(features = "color")] {
-            use coloriz::*;
-
-            let max = self.max_point().0;
-            let min = self.min_point().0;
-            let ground_color_scale = 255 / (max - self.water_level);
-            let water_color_scale = 255 / (self.water_level - min);
+        for vec in self.map.clone().into_iter() {
+            for item in vec.into_iter() {
+                let mut val;
+                if item < self.water_level {
+                    val = format!("{:02}", self.water_level - item);
+                    
+                } else {
+                    val = format!("{:02}", item - self.water_level);
+                }
+                val.truncate(2);
+                print!("{}", val);
+            }
+            println!("]");
         }
+        println!("max: {:?} min: {:?}", self.max_point(), self.min_point());
+        println!("cont: {:?} avg: {:?} lin: {} size: {}", self.count_continuity(), (self.average_ground(), self.average_water()), self.linear_ground(), self.size.0 * self.size.1);
+
+    }
+
+    #[cfg(feature = "color")]
+    fn display(&self) {
+        use coloriz::*;
+
+        let max = self.max_point().0;
+        let min = self.min_point().0;
+        let ground_color_scale = 255 / (max - self.water_level);
+        let water_color_scale = 255 / (self.water_level - min);
 
         for vec in self.map.clone().into_iter() {
             for item in vec.into_iter() {
@@ -106,22 +126,14 @@ impl HeightMap {
                 if item < self.water_level {
                     val = format!("{:02}", self.water_level - item);
                     val.truncate(2);
-                    #[cfg(features = "color")] {
                     let color = if item != min {(0, 0, ((self.water_level - item) * water_color_scale).try_into().unwrap_or(0))} else {(255, 255, 255)};
-                        print!("{}", val.bg(color).invisible());
-                    }
-                    #[cfg(not(features = "color"))]
-                        print!("{}", val);
+                    print!("{}", val.bg(color).invisible());
                     
                 } else {
                     val = format!("{:02}", item - self.water_level);
                     val.truncate(2);
-                    #[cfg(features = "color")] {
-                        let color = if item != max {(0,((item - self.water_level) * ground_color_scale).try_into().unwrap_or(0), 0)} else {(255, 0, 0)};
-                        print!("{}", val.bg(color).invisible());
-                    }
-                    #[cfg(not(features = "color"))]
-                        print!("{}", val);
+                    let color = if item != max {(0,((item - self.water_level) * ground_color_scale).try_into().unwrap_or(0), 0)} else {(255, 0, 0)};
+                    print!("{}", val.bg(color).invisible());
                 }
             }
             println!("]");
