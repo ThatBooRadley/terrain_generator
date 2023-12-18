@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::{io::Write, mem::size_of_val};
 
 const SIZE: (usize, usize) = (64, 64);
 const WATERLEVEL: i32 = (HEIGHTMAX.0 - HEIGHTMAX.1) / 8;
@@ -9,10 +9,23 @@ fn main() {
     let _ = std::io::stdout().flush();
     let mut seed = String::new();
     let _ = std::io::stdin().read_line(&mut seed);
+    seed = seed.trim_end().to_string();
 
     let height_map = HeightMap::new(seed.to_string());
     height_map.display();
-    println!("seed: {}", seed.to_string());
+    println!("seed: {} size: {}", seed.to_string(), size_of_val(&height_map));
+    
+    let compressed_map = height_map.compress(10);
+    println!("compressed map size: {}", size_of_val(&compressed_map));
+    
+    let mut decompressed_map = HeightMap::decompress(compressed_map, HEIGHTMAX.0, HEIGHTMAX.1);
+    println!("decompressed map size: {}", size_of_val(&decompressed_map));
+
+    decompressed_map.display();
+
+    decompressed_map.linear_scale();
+    decompressed_map.reduce_noise();
+    decompressed_map.display()
 }
 
 struct HeightMap{
@@ -72,7 +85,6 @@ impl HeightMap {
 
         let mut generation = 1;
         while height_map.continuity_comparison() {
-            print!("\x1B[2J\x1B[1;1H");
             height_map.display();
             println!("generation: {}", generation);
             
@@ -141,6 +153,59 @@ impl HeightMap {
         println!("max: {:?} min: {:?}", self.max_point(), self.min_point());
         println!("cont: {:?} avg: {:?} lin: {} size: {}", self.count_continuity(), (self.average_ground(), self.average_water()), self.linear_ground(), self.size.0 * self.size.1);
 
+    }
+
+    fn compress(&self, layers: usize) -> Vec<Vec<(i32, usize)>> {
+        let size = (self.max_point().0 - self.min_point().0) / if layers != 0 {layers.try_into().unwrap_or(1)} else {self.max_point().0 - self.min_point().0};
+        let mut out = Vec::new();
+
+        for i in 0..self.size.0 {
+            let mut count = 1;
+            let mut prev = self.map[i][0] / size;
+            out.push(Vec::new());
+            for j in 1..self.size.1 {
+                if self.map[i][j] / size == prev {
+                    count += 1;
+                } else {
+                    out[i].push((prev, count));
+                    count = 1;
+                    prev = self.map[i][j] / size;
+                }
+            }
+            out[i].push((prev, count));
+        }
+        out
+    }
+
+    fn decompress(
+        compressed_map: Vec<Vec<(i32, usize)>>,
+        max: i32,
+        min: i32
+    ) -> HeightMap {
+        let mut map = Vec::new();
+        let mut width = 0;
+        let length = compressed_map.len();
+
+        for index in 0..compressed_map.len() {
+            width = 0;
+            map.push(Vec::new());
+            for (height, len) in compressed_map[index].clone().into_iter() {
+                for _ in 0..len {
+                    map[index].push(height);
+                }
+                width += len;
+            }
+        }
+
+        HeightMap {
+            size: (length, width),
+            max: max,
+            min: min,
+            water_level: (max - min) / 8,
+            seed: None,
+
+            map: map,
+        }
     }
 
     fn generate(&mut self, seed: usize) {
@@ -269,6 +334,19 @@ impl HeightMap {
                 }
             }
         }
+    }
+
+    fn linear_scale(&mut self) {
+        let max = self.max_point().0;
+        let min = self.min_point().0;
+        let scale = (self.max - self.min, if max - min != 0 {max - min} else {1});
+
+        for vec in self.map.iter_mut() {
+            for item in vec.iter_mut() {
+                *item = *item * scale.0 / scale.1;
+            }
+        }
+
     }
 
     fn remove_edges(&mut self) {
@@ -482,8 +560,8 @@ impl HeightMap {
 
     fn max_point(&self) -> (i32, usize, usize) {
         let mut max = (self.min, 0, 0);
-        for i in 0..self.size.0 {
-            for j in 0..self.size.1 {
+        for i in 0..self.map.len() {
+            for j in 0..self.map[i].len() {
                 if max.0 < self.map[i][j] {
                     max = (self.map[i][j], i, j);
                 }
@@ -494,8 +572,8 @@ impl HeightMap {
 
     fn min_point(&self) -> (i32, usize, usize) {
         let mut min = (self.max, 0, 0);
-        for i in 0..self.size.0 {
-            for j in 0..self.size.1 {
+        for i in 0..self.map.len() {
+            for j in 0..self.map[i].len() {
                 if min.0 > self.map[i][j] {
                     min = (self.map[i][j], i, j);
                 }
@@ -568,8 +646,8 @@ fn get_filter(
 ) -> Vec<Vec<i32>> {
     let mut filter = empty_matrix(height, width);
 
-    for i in 1..height -1 {
-        for j in 1..width -1 {
+    for i in 1..height - 1 {
+        for j in 1..width - 1 {
             let directions = [
                 matrix[i-1][j-1], matrix[i][j-1], matrix[i+1][j-1],
                 matrix[i-1][j], matrix[i+1][j],
